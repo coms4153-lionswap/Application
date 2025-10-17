@@ -1,0 +1,11 @@
+# Ignore dependencies
+node_modules/
+
+# Build outputs
+dist/
+
+# Environment files
+.env
+
+# macOS
+.DS_Store
