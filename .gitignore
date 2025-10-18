@@ -1,4 +1,4 @@
-# Ignore dependencies
+# Dependencies
 node_modules/
 
 # Environment files
