@@ -22,7 +22,7 @@ export default function App() {
       </header>
 
       <section className="text-center mt-8">
-        <p className="mb-4 text-gray-600">Welcome — browse items or sign in to manage your listings.</p>
+        <p className="mb-4 text-gray-600">Welcome! Browse items or sign in to manage your listings.</p>
         <div className="mt-6">
           <Link to="/about" className="text-blue-500 underline">
             Go to About →
