@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 
 export default function App() {
-  const [count, setCount] = useState(0);
   return (
     <main className="max-w-xl mx-auto p-8">
       <header className="flex items-center justify-between mb-6">
