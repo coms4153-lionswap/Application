@@ -3,10 +3,28 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
     <title>LionSwap</title>
+    <script>
+      window.onerror = function(message, source, lineno, colno, error) {
+        var errorDiv = document.createElement('div');
+        errorDiv.style.cssText = 'position:fixed;top:0;left:0;width:100%;background:red;color:white;padding:20px;z-index:9999;font-family:monospace;';
+        errorDiv.innerHTML = '<h3>Global Error</h3><p>' + message + '</p><p>' + source + ':' + lineno + '</p>';
+        document.body.appendChild(errorDiv);
+        console.error("Global Error:", message, source, lineno, error);
+      };
+      console.log("Index.html loaded, waiting for module...");
+    </script>
   </head>
-  <body>
-    <div id="root"></div>
+   <body style="background-color: #FFFFFF; color: #000000; margin: 0; font-family: sans-serif;">
+    <div id="root">
+      <div style="padding: 40px; text-align: center; margin-top: 100px;">
+        <h1 style="color: #000000; font-size: 24px; font-weight: bold; margin-bottom: 16px;">LionSwap</h1>
+        <p style="color: #666666;">Loading...</p>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

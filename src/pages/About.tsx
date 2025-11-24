@@ -2,18 +2,18 @@ import { Link } from "react-router-dom";
 
 export default function About() {
   return (
-    <section className="max-w-xl mx-auto p-8 text-center">
-      <header className="flex items-center justify-between mb-6">
-        <h2 className="text-2xl font-semibold mb-4">About Page</h2>
-      </header>
-
-      <p className="text-gray-600 mb-6">
-        This is a placehholder application for LionSwap.
-      </p>
-      
-      <Link to="/" className="text-blue-500 underline">
-        ← Back home
-      </Link>
-    </section>
+    <div className="min-h-screen bg-white flex flex-col items-center justify-center p-8">
+      <div className="max-w-xl w-full text-center">
+        <h2 className="text-3xl font-bold mb-6 text-black">About LionSwap</h2>
+        <p className="text-gray-500 mb-10 leading-relaxed">
+          LionSwap is the exclusive marketplace for the Columbia University community.
+          Built by students, for students.
+        </p>
+        
+        <Link to="/" className="btn-secondary inline-block">
+          Back to Home
+        </Link>
+      </div>
+    </div>
   );
 }

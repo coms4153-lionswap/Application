@@ -17,6 +17,12 @@ export default function App() {
           <Link to="/items" className="text-blue-500 underline text-sm">
             Item Listing
           </Link>
+          <Link to="/reservations" className="text-blue-500 underline text-sm">
+            Reservations
+          </Link>
+          <Link to="/conversations" className="text-blue-500 underline text-sm">
+            Messages
+          </Link>
         </nav>
       </header>
 
