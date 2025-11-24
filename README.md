@@ -1,8 +1,5 @@
 # LionSwap Application
 
-```bash
-npm install
-npm run dev
-```
+Access the deployed website here: https://storage.googleapis.com/lionswap-frontend/index.html#/
 
-Open http://localhost:5173
+Remember to bypass the security check here to access the conversation:https://34.23.14.69/conversations
