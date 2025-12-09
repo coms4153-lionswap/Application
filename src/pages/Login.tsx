@@ -27,6 +27,19 @@ export default function Login() {
         localStorage.setItem('user_email', data.email);
         localStorage.setItem('user_id', data.user_id?.toString() || '');
         
+        // Fetch user profile to get UNI
+        try {
+          const userResponse = await fetch(`${API_CONFIG.IDENTITY_SERVICE_URL}/users?user_id=${data.user_id}`);
+          if (userResponse.ok) {
+            const users = await userResponse.json();
+            if (users && users.length > 0) {
+              localStorage.setItem('user_uni', users[0].uni);
+            }
+          }
+        } catch (err) {
+          console.warn("Failed to fetch user profile:", err);
+        }
+        
         // Now exchange the Google access_token for a JWT from our Identity service
         // According to the message, we need to pass access_token to JWT service
         try {

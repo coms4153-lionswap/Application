@@ -42,7 +42,7 @@ export default function Reservations() {
       if (!response.ok) throw new Error("Failed to fetch reservations");
       const data = await response.json();
       
-      // Verify each item still exists and remove reservations for missing items
+      // Verify each item still exists, fetch item details, and remove reservations for missing items
       const validReservations: ReservationWithItem[] = [];
       const missingItemReservations: string[] = [];
       
@@ -50,13 +50,14 @@ export default function Reservations() {
         try {
           const itemResponse = await fetch(`${API_CONFIG.CATALOG_SERVICE_URL}/items/${reservation.item_id}`);
           if (itemResponse.ok) {
-            validReservations.push(reservation);
+            const item = await itemResponse.json();
+            validReservations.push({ ...reservation, item });
           } else {
             // Item doesn't exist, mark for deletion
             missingItemReservations.push(reservation.reservation_id);
           }
         } catch {
-          // If fetch fails, keep the reservation (might be network issue)
+          // If fetch fails, keep the reservation without item details (might be network issue)
           validReservations.push(reservation);
         }
       }
@@ -95,9 +96,25 @@ export default function Reservations() {
     }
   };
 
-  const handleReReserve = async (itemId: number) => {
+  const handleReReserve = async (itemId: number, reservationId: string) => {
     setError("");
     try {
+      // First, delete all inactive reservations for this item
+      const inactiveReservations = reservations.filter(
+        r => r.item_id === itemId && r.status === "INACTIVE"
+      );
+      
+      for (const inactiveRes of inactiveReservations) {
+        try {
+          await fetch(`${API_CONFIG.RESERVATION_SERVICE_URL}/reservations/${inactiveRes.reservation_id}`, {
+            method: "DELETE",
+          });
+        } catch {
+          // Continue even if deletion fails
+        }
+      }
+
+      // Now create the new reservation
       const response = await fetch(`${API_CONFIG.RESERVATION_SERVICE_URL}/items/${itemId}/reservations`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -114,6 +131,25 @@ export default function Reservations() {
     } catch (err: any) {
       setError(err.message || "Failed to re-reserve item. Item may no longer be available.");
     }
+  };
+
+  const handleCleanupInactive = async () => {
+    if (!confirm("Delete all inactive reservations?")) return;
+    
+    setError("");
+    const inactiveReservations = reservations.filter(r => r.status === "INACTIVE");
+    
+    for (const reservation of inactiveReservations) {
+      try {
+        await fetch(`${API_CONFIG.RESERVATION_SERVICE_URL}/reservations/${reservation.reservation_id}`, {
+          method: "DELETE",
+        });
+      } catch {
+        // Continue even if deletion fails
+      }
+    }
+    
+    await fetchReservations();
   };
 
   const getTimeRemaining = (expiresAt: string) => {
@@ -183,7 +219,9 @@ export default function Reservations() {
               <div key={reservation.reservation_id} className="border border-gray-200 rounded-xl p-6 hover:border-black transition-colors">
                 <div className="mb-4">
                   <div className="flex justify-between items-start mb-2">
-                    <h3 className="font-semibold text-lg text-black">Item #{reservation.item_id}</h3>
+                    <h3 className="font-semibold text-lg text-black">
+                      {reservation.item?.name || `Item #${reservation.item_id}`}
+                    </h3>
                     <span className={`px-2 py-1 rounded text-xs ${
                       reservation.status === "ACTIVE" ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-700"
                     }`}>
@@ -215,15 +253,29 @@ export default function Reservations() {
 
             {/* Inactive Reservations */}
             <div>
-              <h3 className="text-xl font-bold text-black mb-4">Inactive Reservations</h3>
-              <p className="text-sm text-gray-500 mb-4">These reservations have expired or been cancelled</p>
+              <div className="flex justify-between items-center mb-4">
+                <div>
+                  <h3 className="text-xl font-bold text-black">Inactive Reservations</h3>
+                  <p className="text-sm text-gray-500">These reservations have expired or been cancelled</p>
+                </div>
+                {reservations.filter(r => r.status === "INACTIVE").length > 0 && (
+                  <button
+                    onClick={handleCleanupInactive}
+                    className="px-4 py-2 text-sm text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
+                  >
+                    Clear All Inactive
+                  </button>
+                )}
+              </div>
               {reservations.filter(r => r.status === "INACTIVE").length > 0 ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {reservations.filter(r => r.status === "INACTIVE").map((reservation) => (
               <div key={reservation.reservation_id} className="border border-gray-200 rounded-xl p-6 opacity-60">
                 <div className="mb-4">
                   <div className="flex justify-between items-start mb-2">
-                    <h3 className="font-semibold text-lg text-black">Item #{reservation.item_id}</h3>
+                    <h3 className="font-semibold text-lg text-black">
+                      {reservation.item?.name || `Item #${reservation.item_id}`}
+                    </h3>
                     <span className="px-2 py-1 rounded text-xs bg-gray-100 text-gray-700">
                       {reservation.status}
                     </span>
@@ -239,7 +291,7 @@ export default function Reservations() {
 
                 <div className="flex gap-2 pt-4 border-t border-gray-100">
                   <button
-                    onClick={() => handleReReserve(reservation.item_id)}
+                    onClick={() => handleReReserve(reservation.item_id, reservation.reservation_id)}
                     className="flex-1 py-2 text-sm bg-black text-white rounded-lg hover:bg-gray-800 transition-colors opacity-100"
                   >
                     Re-reserve
