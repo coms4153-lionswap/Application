@@ -41,7 +41,38 @@ export default function Reservations() {
       const response = await fetch(`${API_CONFIG.RESERVATION_SERVICE_URL}/reservations?buyer_id=${currentUserId}`);
       if (!response.ok) throw new Error("Failed to fetch reservations");
       const data = await response.json();
-      setReservations(data);
+      
+      // Verify each item still exists and remove reservations for missing items
+      const validReservations: ReservationWithItem[] = [];
+      const missingItemReservations: string[] = [];
+      
+      for (const reservation of data) {
+        try {
+          const itemResponse = await fetch(`${API_CONFIG.CATALOG_SERVICE_URL}/items/${reservation.item_id}`);
+          if (itemResponse.ok) {
+            validReservations.push(reservation);
+          } else {
+            // Item doesn't exist, mark for deletion
+            missingItemReservations.push(reservation.reservation_id);
+          }
+        } catch {
+          // If fetch fails, keep the reservation (might be network issue)
+          validReservations.push(reservation);
+        }
+      }
+      
+      // Delete reservations for missing items
+      for (const reservationId of missingItemReservations) {
+        try {
+          await fetch(`${API_CONFIG.RESERVATION_SERVICE_URL}/reservations/${reservationId}`, {
+            method: "DELETE",
+          });
+        } catch {
+          // Ignore deletion errors
+        }
+      }
+      
+      setReservations(validReservations);
     } catch (err: any) {
       setError(err.message || "Failed to load reservations. Service may not be deployed.");
     } finally {
@@ -61,6 +92,27 @@ export default function Reservations() {
       await fetchReservations();
     } catch (err: any) {
       setError(err.message || "Failed to cancel reservation");
+    }
+  };
+
+  const handleReReserve = async (itemId: number) => {
+    setError("");
+    try {
+      const response = await fetch(`${API_CONFIG.RESERVATION_SERVICE_URL}/items/${itemId}/reservations`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ buyer_id: currentUserId }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || "Failed to re-reserve item");
+      }
+
+      alert("Item re-reserved successfully!");
+      await fetchReservations();
+    } catch (err: any) {
+      setError(err.message || "Failed to re-reserve item. Item may no longer be available.");
     }
   };
 
@@ -115,14 +167,19 @@ export default function Reservations() {
         ) : reservations.length === 0 ? (
           <div className="text-center py-20">
             <div className="text-6xl mb-4">🔖</div>
-            <p className="text-gray-500 mb-4">No active reservations</p>
+            <p className="text-gray-500 mb-4">No reservations found</p>
             <Link to="/items" className="text-blue-500 hover:underline">
               Browse items to reserve
             </Link>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {reservations.map((reservation) => (
+          <>
+            {/* Active Reservations */}
+            {reservations.filter(r => r.status === "ACTIVE").length > 0 && (
+              <div className="mb-12">
+                <h3 className="text-xl font-bold text-black mb-4">Active Reservations</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {reservations.filter(r => r.status === "ACTIVE").map((reservation) => (
               <div key={reservation.reservation_id} className="border border-gray-200 rounded-xl p-6 hover:border-black transition-colors">
                 <div className="mb-4">
                   <div className="flex justify-between items-start mb-2">
@@ -151,8 +208,53 @@ export default function Reservations() {
                   </button>
                 </div>
               </div>
-            ))}
-          </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Inactive Reservations */}
+            <div>
+              <h3 className="text-xl font-bold text-black mb-4">Inactive Reservations</h3>
+              <p className="text-sm text-gray-500 mb-4">These reservations have expired or been cancelled</p>
+              {reservations.filter(r => r.status === "INACTIVE").length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {reservations.filter(r => r.status === "INACTIVE").map((reservation) => (
+              <div key={reservation.reservation_id} className="border border-gray-200 rounded-xl p-6 opacity-60">
+                <div className="mb-4">
+                  <div className="flex justify-between items-start mb-2">
+                    <h3 className="font-semibold text-lg text-black">Item #{reservation.item_id}</h3>
+                    <span className="px-2 py-1 rounded text-xs bg-gray-100 text-gray-700">
+                      {reservation.status}
+                    </span>
+                  </div>
+                  
+                  <div className="text-sm text-gray-600 space-y-1">
+                    <p>❌ Expired</p>
+                    <p className="text-xs text-gray-400">
+                      Expired: {new Date(reservation.hold_expires_at).toLocaleString()}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex gap-2 pt-4 border-t border-gray-100">
+                  <button
+                    onClick={() => handleReReserve(reservation.item_id)}
+                    className="flex-1 py-2 text-sm bg-black text-white rounded-lg hover:bg-gray-800 transition-colors opacity-100"
+                  >
+                    Re-reserve
+                  </button>
+                </div>
+              </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-12 border border-gray-200 rounded-xl">
+                  <p className="text-gray-400">No inactive reservations</p>
+                </div>
+              )}
+            </div>
+          </>
         )}
       </div>
     </div>

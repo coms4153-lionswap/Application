@@ -8,6 +8,7 @@ import Items from "./pages/Items";
 import Conversations from "./pages/Conversations";
 import Profile from "./pages/Profile";
 import Reservations from "./pages/Reservations";
+import OAuthCallback from "./pages/OAuthCallback";
 import "./index.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
@@ -21,6 +22,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
         <Route path="/conversations" element={<Conversations />} />
         <Route path="/profile" element={<Profile />} />
         <Route path="/reservations" element={<Reservations />} />
+        <Route path="/auth/callback" element={<OAuthCallback />} />
       </Routes>
     </HashRouter>
   </React.StrictMode>
