@@ -5,7 +5,7 @@ export const API_CONFIG = {
     : "https://ms1-identity-157498364441.us-east1.run.app",
   CATALOG_SERVICE_URL: import.meta.env.DEV
     ? "/api/catalog"
-    : "https://catalog-1003140017553.us-east1.run.app",
+    : "https://catalog-okz7qtaq4a-ue.a.run.app",
   CONVERSATION_SERVICE_URL: import.meta.env.DEV
     ? "/api/conversation"
     : "https://34.23.14.69",

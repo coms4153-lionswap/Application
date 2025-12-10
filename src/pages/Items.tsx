@@ -13,8 +13,22 @@ interface Item {
   updated_at: string;
 }
 
+interface ItemImage {
+  id: number;
+  item_id: number;
+  image_url: string;
+  alt_text: string | null;
+  is_primary: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+interface ItemWithImages extends Item {
+  images?: ItemImage[];
+}
+
 export default function Items() {
-  const [items, setItems] = useState<Item[]>([]);
+  const [items, setItems] = useState<ItemWithImages[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
@@ -47,17 +61,46 @@ export default function Items() {
     try {
       setLoading(true);
       setError("");
-      let url = `${API_CONFIG.CATALOG_SERVICE_URL}/items`;
       
-      if (category !== "All Categories") {
-        url = `${API_CONFIG.CATALOG_SERVICE_URL}/items/category/${encodeURIComponent(category)}`;
-      }
+      // Always fetch all items first
+      let url = `${API_CONFIG.CATALOG_SERVICE_URL}/items`;
       
       const response = await fetch(url);
       if (!response.ok) throw new Error("Failed to fetch items");
       
-      const data = await response.json();
-      setItems(data);
+      let data: Item[] = await response.json();
+      
+      // Filter by category
+      if (category !== "All Categories") {
+        if (category === "Other") {
+          // "Other" shows items not in the predefined categories (case-insensitive)
+          const predefinedCategories = ["electronics", "textbooks", "furniture", "clothing"];
+          data = data.filter(item => !predefinedCategories.includes(item.category.toLowerCase()));
+        } else {
+          // Regular category filter (case-insensitive)
+          data = data.filter(item => item.category.toLowerCase() === category.toLowerCase());
+        }
+      }
+      
+      // Fetch images for each item
+      const itemsWithImages = await Promise.all(
+        data.map(async (item) => {
+          try {
+            const imagesResponse = await fetch(
+              `${API_CONFIG.CATALOG_SERVICE_URL}/items/${item.id}/images`
+            );
+            if (imagesResponse.ok) {
+              const images: ItemImage[] = await imagesResponse.json();
+              return { ...item, images };
+            }
+          } catch (err) {
+            console.warn(`Failed to fetch images for item ${item.id}:`, err);
+          }
+          return { ...item, images: [] };
+        })
+      );
+      
+      setItems(itemsWithImages);
     } catch (err: any) {
       setError(err.message || "Failed to load items");
       setItems([]);
@@ -220,7 +263,6 @@ export default function Items() {
         <div className="max-w-7xl mx-auto flex justify-between items-center">
           <Link to="/" className="text-xl font-bold tracking-tight text-black">LionSwap</Link>
           <div className="flex gap-4">
-            <Link to="/users" className="text-sm font-medium text-gray-500 hover:text-black">Users</Link>
             <Link to="/reservations" className="text-sm font-medium text-gray-500 hover:text-black">Reservations</Link>
             <Link to="/profile" className="text-sm font-medium text-gray-500 hover:text-black">Profile</Link>
           </div>
@@ -293,60 +335,87 @@ export default function Items() {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filteredItems.map((item) => (
-              <div key={item.id} className="border border-gray-200 rounded-xl p-6 hover:border-black transition-colors">
-                <div className="flex justify-between items-start mb-4">
-                  <div className="flex-1">
-                    <h3 className="font-semibold text-lg text-black mb-1">{item.name}</h3>
-                    <p className="text-sm text-gray-500 mb-2">{item.description || "No description"}</p>
-                    <div className="flex items-center gap-3 text-xs">
-                      <span className="px-2 py-1 bg-gray-100 rounded text-gray-600">{item.category}</span>
-                      <span className={`px-2 py-1 rounded ${
-                        item.status === "available" ? "bg-green-100 text-green-700" :
-                        item.status === "reserved" ? "bg-yellow-100 text-yellow-700" :
-                        "bg-gray-100 text-gray-700"
-                      }`}>
-                        {item.status}
-                      </span>
+            {filteredItems.map((item) => {
+              const primaryImage = item.images?.find(img => img.is_primary) || item.images?.[0];
+              
+              return (
+              <div key={item.id} className="border border-gray-200 rounded-xl overflow-hidden hover:border-black transition-colors">
+                {/* Image Section */}
+                {primaryImage ? (
+                  <div className="aspect-video w-full bg-gray-100 overflow-hidden">
+                    <img 
+                      src={primaryImage.image_url} 
+                      alt={primaryImage.alt_text || item.name}
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        // Fallback if image fails to load
+                        e.currentTarget.style.display = 'none';
+                        e.currentTarget.parentElement!.innerHTML = '<div class="w-full h-full flex items-center justify-center text-gray-400 text-4xl">📦</div>';
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <div className="aspect-video w-full bg-gray-100 flex items-center justify-center text-gray-400 text-4xl">
+                    📦
+                  </div>
+                )}
+                
+                {/* Content Section */}
+                <div className="p-6">
+                  <div className="flex justify-between items-start mb-4">
+                    <div className="flex-1">
+                      <h3 className="font-semibold text-lg text-black mb-1">{item.name}</h3>
+                      <p className="text-sm text-gray-500 mb-2">{item.description || "No description"}</p>
+                      <div className="flex items-center gap-3 text-xs">
+                        <span className="px-2 py-1 bg-gray-100 rounded text-gray-600">{item.category}</span>
+                        <span className={`px-2 py-1 rounded ${
+                          item.status === "available" ? "bg-green-100 text-green-700" :
+                          item.status === "reserved" ? "bg-yellow-100 text-yellow-700" :
+                          "bg-gray-100 text-gray-700"
+                        }`}>
+                          {item.status}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-xl font-bold text-black">${item.price}</div>
                     </div>
                   </div>
-                  <div className="text-right">
-                    <div className="text-xl font-bold text-black">${item.price}</div>
+
+                  <div className="flex gap-2 pt-4 border-t border-gray-100">
+                    {item.status === "available" ? (
+                      <button
+                        onClick={() => handleReserve(item.id)}
+                        disabled={reserving === item.id}
+                        className="flex-1 py-2 text-sm bg-black text-white rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50"
+                      >
+                        {reserving === item.id ? "Reserving..." : "Reserve"}
+                      </button>
+                    ) : (
+                      <button
+                        disabled
+                        className="flex-1 py-2 text-sm bg-gray-100 text-gray-400 rounded-lg cursor-not-allowed"
+                      >
+                        {item.status === "reserved" ? "Reserved" : "Sold"}
+                      </button>
+                    )}
+                    <button
+                      onClick={() => openEditModal(item)}
+                      className="flex-1 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => openDeleteModal(item)}
+                      className="flex-1 py-2 text-sm border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-colors"
+                    >
+                      Delete
+                    </button>
                   </div>
                 </div>
-
-                <div className="flex gap-2 pt-4 border-t border-gray-100">
-                  {item.status === "available" ? (
-                    <button
-                      onClick={() => handleReserve(item.id)}
-                      disabled={reserving === item.id}
-                      className="flex-1 py-2 text-sm bg-black text-white rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50"
-                    >
-                      {reserving === item.id ? "Reserving..." : "Reserve"}
-                    </button>
-                  ) : (
-                    <button
-                      disabled
-                      className="flex-1 py-2 text-sm bg-gray-100 text-gray-400 rounded-lg cursor-not-allowed"
-                    >
-                      {item.status === "reserved" ? "Reserved" : "Sold"}
-                    </button>
-                  )}
-                  <button
-                    onClick={() => openEditModal(item)}
-                    className="flex-1 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    onClick={() => openDeleteModal(item)}
-                    className="flex-1 py-2 text-sm border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-colors"
-                  >
-                    Delete
-                  </button>
-                </div>
               </div>
-            ))}
+            );
+            })}
           </div>
         )}
       </div>

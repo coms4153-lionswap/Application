@@ -12,7 +12,7 @@ export default defineConfig({
         rewrite: (path) => path.replace(/^\/api\/identity/, ""),
       },
       "/api/catalog": {
-        target: "https://catalog-1003140017553.us-east1.run.app",
+        target: "https://catalog-okz7qtaq4a-ue.a.run.app",
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/catalog/, ""),
       },

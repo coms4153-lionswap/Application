@@ -20,8 +20,22 @@ interface Item {
   status: string;
 }
 
+interface ItemImage {
+  id: number;
+  item_id: number;
+  image_url: string;
+  alt_text: string | null;
+  is_primary: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+interface ItemWithImages extends Item {
+  images?: ItemImage[];
+}
+
 interface ReservationWithItem extends Reservation {
-  item?: Item;
+  item?: ItemWithImages;
 }
 
 export default function Reservations() {
@@ -51,7 +65,21 @@ export default function Reservations() {
           const itemResponse = await fetch(`${API_CONFIG.CATALOG_SERVICE_URL}/items/${reservation.item_id}`);
           if (itemResponse.ok) {
             const item = await itemResponse.json();
-            validReservations.push({ ...reservation, item });
+            
+            // Fetch images for the item
+            try {
+              const imagesResponse = await fetch(
+                `${API_CONFIG.CATALOG_SERVICE_URL}/items/${reservation.item_id}/images`
+              );
+              if (imagesResponse.ok) {
+                const images: ItemImage[] = await imagesResponse.json();
+                validReservations.push({ ...reservation, item: { ...item, images } });
+              } else {
+                validReservations.push({ ...reservation, item: { ...item, images: [] } });
+              }
+            } catch {
+              validReservations.push({ ...reservation, item: { ...item, images: [] } });
+            }
           } else {
             // Item doesn't exist, mark for deletion
             missingItemReservations.push(reservation.reservation_id);
@@ -215,38 +243,64 @@ export default function Reservations() {
               <div className="mb-12">
                 <h3 className="text-xl font-bold text-black mb-4">Active Reservations</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {reservations.filter(r => r.status === "ACTIVE").map((reservation) => (
-              <div key={reservation.reservation_id} className="border border-gray-200 rounded-xl p-6 hover:border-black transition-colors">
-                <div className="mb-4">
-                  <div className="flex justify-between items-start mb-2">
-                    <h3 className="font-semibold text-lg text-black">
-                      {reservation.item?.name || `Item #${reservation.item_id}`}
-                    </h3>
-                    <span className={`px-2 py-1 rounded text-xs ${
-                      reservation.status === "ACTIVE" ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-700"
-                    }`}>
-                      {reservation.status}
-                    </span>
+                  {reservations.filter(r => r.status === "ACTIVE").map((reservation) => {
+                    const primaryImage = reservation.item?.images?.find(img => img.is_primary) || reservation.item?.images?.[0];
+                    
+                    return (
+              <div key={reservation.reservation_id} className="border border-gray-200 rounded-xl overflow-hidden hover:border-black transition-colors">
+                {/* Image Section */}
+                {primaryImage ? (
+                  <div className="aspect-video w-full bg-gray-100 overflow-hidden">
+                    <img 
+                      src={primaryImage.image_url} 
+                      alt={primaryImage.alt_text || reservation.item?.name || `Item #${reservation.item_id}`}
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none';
+                        e.currentTarget.parentElement!.innerHTML = '<div class="w-full h-full flex items-center justify-center text-gray-400 text-4xl">📦</div>';
+                      }}
+                    />
                   </div>
-                  
-                  <div className="text-sm text-gray-600 space-y-1">
-                    <p>⏱️ {getTimeRemaining(reservation.hold_expires_at)}</p>
-                    <p className="text-xs text-gray-400">
-                      Expires: {new Date(reservation.hold_expires_at).toLocaleString()}
-                    </p>
+                ) : (
+                  <div className="aspect-video w-full bg-gray-100 flex items-center justify-center text-gray-400 text-4xl">
+                    📦
                   </div>
-                </div>
+                )}
+                
+                {/* Content Section */}
+                <div className="p-6">
+                  <div className="mb-4">
+                    <div className="flex justify-between items-start mb-2">
+                      <h3 className="font-semibold text-lg text-black">
+                        {reservation.item?.name || `Item #${reservation.item_id}`}
+                      </h3>
+                      <span className={`px-2 py-1 rounded text-xs ${
+                        reservation.status === "ACTIVE" ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-700"
+                      }`}>
+                        {reservation.status}
+                      </span>
+                    </div>
+                    
+                    <div className="text-sm text-gray-600 space-y-1">
+                      <p>⏱️ {getTimeRemaining(reservation.hold_expires_at)}</p>
+                      <p className="text-xs text-gray-400">
+                        Expires: {new Date(reservation.hold_expires_at).toLocaleString()}
+                      </p>
+                    </div>
+                  </div>
 
-                <div className="flex gap-2 pt-4 border-t border-gray-100">
-                  <button
-                    onClick={() => handleCancelReservation(reservation.reservation_id)}
-                    className="flex-1 py-2 text-sm border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-colors"
-                  >
-                    Cancel
-                  </button>
+                  <div className="flex gap-2 pt-4 border-t border-gray-100">
+                    <button
+                      onClick={() => handleCancelReservation(reservation.reservation_id)}
+                      className="flex-1 py-2 text-sm border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
                 </div>
               </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -269,36 +323,62 @@ export default function Reservations() {
               </div>
               {reservations.filter(r => r.status === "INACTIVE").length > 0 ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {reservations.filter(r => r.status === "INACTIVE").map((reservation) => (
-              <div key={reservation.reservation_id} className="border border-gray-200 rounded-xl p-6 opacity-60">
-                <div className="mb-4">
-                  <div className="flex justify-between items-start mb-2">
-                    <h3 className="font-semibold text-lg text-black">
-                      {reservation.item?.name || `Item #${reservation.item_id}`}
-                    </h3>
-                    <span className="px-2 py-1 rounded text-xs bg-gray-100 text-gray-700">
-                      {reservation.status}
-                    </span>
+                  {reservations.filter(r => r.status === "INACTIVE").map((reservation) => {
+                    const primaryImage = reservation.item?.images?.find(img => img.is_primary) || reservation.item?.images?.[0];
+                    
+                    return (
+              <div key={reservation.reservation_id} className="border border-gray-200 rounded-xl overflow-hidden opacity-60">
+                {/* Image Section */}
+                {primaryImage ? (
+                  <div className="aspect-video w-full bg-gray-100 overflow-hidden">
+                    <img 
+                      src={primaryImage.image_url} 
+                      alt={primaryImage.alt_text || reservation.item?.name || `Item #${reservation.item_id}`}
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none';
+                        e.currentTarget.parentElement!.innerHTML = '<div class="w-full h-full flex items-center justify-center text-gray-400 text-4xl">📦</div>';
+                      }}
+                    />
                   </div>
-                  
-                  <div className="text-sm text-gray-600 space-y-1">
-                    <p>❌ Expired</p>
-                    <p className="text-xs text-gray-400">
-                      Expired: {new Date(reservation.hold_expires_at).toLocaleString()}
-                    </p>
+                ) : (
+                  <div className="aspect-video w-full bg-gray-100 flex items-center justify-center text-gray-400 text-4xl">
+                    📦
                   </div>
-                </div>
+                )}
+                
+                {/* Content Section */}
+                <div className="p-6">
+                  <div className="mb-4">
+                    <div className="flex justify-between items-start mb-2">
+                      <h3 className="font-semibold text-lg text-black">
+                        {reservation.item?.name || `Item #${reservation.item_id}`}
+                      </h3>
+                      <span className="px-2 py-1 rounded text-xs bg-gray-100 text-gray-700">
+                        {reservation.status}
+                      </span>
+                    </div>
+                    
+                    <div className="text-sm text-gray-600 space-y-1">
+                      <p>❌ Expired</p>
+                      <p className="text-xs text-gray-400">
+                        Expired: {new Date(reservation.hold_expires_at).toLocaleString()}
+                      </p>
+                    </div>
+                  </div>
 
-                <div className="flex gap-2 pt-4 border-t border-gray-100">
-                  <button
-                    onClick={() => handleReReserve(reservation.item_id, reservation.reservation_id)}
-                    className="flex-1 py-2 text-sm bg-black text-white rounded-lg hover:bg-gray-800 transition-colors opacity-100"
-                  >
-                    Re-reserve
-                  </button>
+                  <div className="flex gap-2 pt-4 border-t border-gray-100">
+                    <button
+                      onClick={() => handleReReserve(reservation.item_id, reservation.reservation_id)}
+                      className="flex-1 py-2 text-sm bg-black text-white rounded-lg hover:bg-gray-800 transition-colors opacity-100"
+                    >
+                      Re-reserve
+                    </button>
+                  </div>
                 </div>
               </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="text-center py-12 border border-gray-200 rounded-xl">
