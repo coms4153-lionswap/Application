@@ -93,25 +93,16 @@ export default function Profile() {
     setError("");
 
     try {
-      // Fetch current user to get fresh ETag
-      const getResponse = await fetch(`${API_CONFIG.IDENTITY_SERVICE_URL}/users/${user.uni}`);
-      if (!getResponse.ok) {
-        throw new Error("Failed to fetch current user data");
-      }
+      // Use the ETag that was fetched when the page loaded (stored in state)
+      // This enables proper optimistic locking - if someone else modified the user
+      // in another tab/session, the ETag will be outdated and backend returns 412
+      let currentEtag = etag;
+      console.log("Using ETag from page load:", currentEtag);
       
-      const userData = await getResponse.json();
-      console.log("Fetched user data:", userData);
-      
-      // Try to get ETag from response headers
-      let currentEtag = getResponse.headers.get("ETag");
-      console.log("ETag from header:", currentEtag);
-      
-      // If ETag not accessible via CORS, construct it from version field
+      // If no ETag available, use a dummy value to trigger 412 from backend
       if (!currentEtag) {
-        // Backend uses W/"{version}" format
-        const version = userData.version ?? 1;
-        currentEtag = `W/"${version}"`;
-        console.log("Constructed ETag from version:", version, "=> ETag:", currentEtag);
+        currentEtag = 'W/"0"';
+        console.log("No ETag available, using dummy value");
       }
 
       console.log("Sending PUT request with ETag:", currentEtag);
@@ -128,7 +119,14 @@ export default function Profile() {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        console.error("Update failed:", errorData, "ETag used:", currentEtag);
+        console.error("Update failed:", response.status, errorData, "ETag used:", currentEtag);
+        
+        if (response.status === 412) {
+          // ETag mismatch - refetch user data to get current state
+          await fetchUserProfile();
+          throw new Error("Profile was modified. Please try again with the updated information.");
+        }
+        
         throw new Error(errorData.detail || "Failed to update department");
       }
 
@@ -139,6 +137,7 @@ export default function Profile() {
       setUser(updatedUser);
       setEtag(newEtag || "");
       setIsEditingDept(false);
+      setNewDeptName("");
     } catch (err: any) {
       setError(err.message || "Failed to update department");
     } finally {

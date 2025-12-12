@@ -32,6 +32,8 @@ export default function Conversations() {
   
   // Form states
   const [newMessage, setNewMessage] = useState("");
+  const [editingMessageId, setEditingMessageId] = useState<number | null>(null);
+  const [editingMessageBody, setEditingMessageBody] = useState("");
   const [currentUserId, setCurrentUserId] = useState(() => {
     const userId = localStorage.getItem('user_id');
     return userId ? parseInt(userId) : 1;
@@ -199,6 +201,48 @@ export default function Conversations() {
     }
   };
 
+  const startEditMessage = (messageId: number, currentBody: string) => {
+    setEditingMessageId(messageId);
+    setEditingMessageBody(currentBody);
+  };
+
+  const cancelEditMessage = () => {
+    setEditingMessageId(null);
+    setEditingMessageBody("");
+  };
+
+  const saveEditMessage = async (messageId: number) => {
+    if (!editingMessageBody.trim() || !selectedConversation) return;
+    
+    setError("");
+    try {
+      const token = localStorage.getItem('app_jwt') || localStorage.getItem('google_access_token');
+      const response = await fetch(
+        `${API_CONFIG.CONVERSATION_SERVICE_URL}/messages/${messageId}`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            conversation_id: selectedConversation,
+            sender_id: currentUserId,
+            message_type: "text",
+            body: editingMessageBody,
+            attachment_url: null,
+          }),
+        }
+      );
+      if (!response.ok) throw new Error("Failed to update message");
+      await fetchMessages(selectedConversation);
+      setEditingMessageId(null);
+      setEditingMessageBody("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update message");
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-7xl mx-auto px-4 py-8">
@@ -296,14 +340,56 @@ export default function Conversations() {
                             <span className="text-xs opacity-75">
                               User {msg.sender_id}
                             </span>
-                            <button
-                              onClick={() => deleteMessage(msg.message_id)}
-                              className="text-xs opacity-75 hover:opacity-100"
-                            >
-                              ×
-                            </button>
+                            {msg.sender_id === currentUserId && (
+                              <div className="flex gap-1">
+                                {editingMessageId !== msg.message_id && (
+                                  <button
+                                    onClick={() => startEditMessage(msg.message_id, msg.body)}
+                                    className="text-xs opacity-75 hover:opacity-100"
+                                    title="Edit"
+                                  >
+                                    ✎
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => deleteMessage(msg.message_id)}
+                                  className="text-xs opacity-75 hover:opacity-100"
+                                  title="Delete"
+                                >
+                                  ×
+                                </button>
+                              </div>
+                            )}
                           </div>
-                          <div className="text-sm">{msg.body}</div>
+                          
+                          {editingMessageId === msg.message_id ? (
+                            <div className="space-y-2">
+                              <textarea
+                                value={editingMessageBody}
+                                onChange={(e) => setEditingMessageBody(e.target.value)}
+                                className="w-full px-2 py-1 text-sm text-black border rounded resize-none focus:outline-none focus:ring-1 focus:ring-blue-400"
+                                rows={3}
+                                autoFocus
+                              />
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => saveEditMessage(msg.message_id)}
+                                  className="px-2 py-1 text-xs bg-white text-blue-500 rounded hover:bg-gray-100"
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  onClick={cancelEditMessage}
+                                  className="px-2 py-1 text-xs bg-white text-gray-700 rounded hover:bg-gray-100"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="text-sm">{msg.body}</div>
+                          )}
+                          
                           <div className="text-xs opacity-75 mt-1">
                             {new Date(msg.created_at).toLocaleTimeString()}
                           </div>

@@ -61,6 +61,34 @@ export default function Reservations() {
     setError("");
     try {
       const token = localStorage.getItem('app_jwt') || localStorage.getItem('google_access_token');
+      
+      // Trigger expire batch to automatically expire any outdated reservations
+      console.log('Calling expire-batch endpoint...');
+      try {
+        const expireResponse = await fetch(`${API_CONFIG.RESERVATION_SERVICE_URL}/reservations/expire-batch`, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${token}`
+          }
+        });
+        console.log('Expire batch response status:', expireResponse.status);
+        if (expireResponse.ok) {
+          const expireData = await expireResponse.json();
+          console.log('Expire batch response data:', expireData);
+          // Wait 3 seconds for the batch expiry to complete
+          if (expireData.scheduled > 0) {
+            console.log(`Waiting 3 seconds for ${expireData.scheduled} reservations to expire...`);
+            await new Promise(resolve => setTimeout(resolve, 3000));
+          }
+        } else {
+          const errorText = await expireResponse.text();
+          console.error('Expire batch failed:', expireResponse.status, errorText);
+        }
+      } catch (err) {
+        console.error('Expire batch error:', err);
+        // Ignore errors - expiry is best-effort
+      }
+      
       const response = await fetch(`${API_CONFIG.RESERVATION_SERVICE_URL}/reservations?buyer_id=${currentUserId}`, {
         headers: {
           "Authorization": `Bearer ${token}`
@@ -290,27 +318,30 @@ export default function Reservations() {
     }
   };
 
-  const handleCleanupInactive = async () => {
-    if (!confirm("Delete all inactive reservations?")) return;
+  const handleDeleteInactive = async (reservationId: string) => {
+    if (!confirm("Delete this inactive reservation?")) return;
     
     setError("");
-    const inactiveReservations = reservations.filter(r => r.status === "INACTIVE");
     const token = localStorage.getItem('app_jwt') || localStorage.getItem('google_access_token');
     
-    for (const reservation of inactiveReservations) {
-      try {
-        await fetch(`${API_CONFIG.RESERVATION_SERVICE_URL}/reservations/${reservation.reservation_id}`, {
-          method: "DELETE",
-          headers: {
-            "Authorization": `Bearer ${token}`
-          }
-        });
-      } catch {
-        // Continue even if deletion fails
+    try {
+      const response = await fetch(`${API_CONFIG.RESERVATION_SERVICE_URL}/reservations/${reservationId}`, {
+        method: "DELETE",
+        headers: {
+          "Authorization": `Bearer ${token}`
+        }
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to delete reservation: ${response.status} - ${errorText}`);
       }
+      
+      await fetchReservations();
+    } catch (err: any) {
+      console.error('Delete error:', err);
+      setError(err.message || "Failed to delete reservation");
     }
-    
-    await fetchReservations();
   };
 
   const getTimeRemaining = (expiresAt: string) => {
@@ -456,19 +487,9 @@ export default function Reservations() {
 
             {/* Inactive Reservations */}
             <div>
-              <div className="flex justify-between items-center mb-4">
-                <div>
-                  <h3 className="text-xl font-bold text-black">Inactive Reservations</h3>
-                  <p className="text-sm text-gray-500">These reservations have expired or been cancelled</p>
-                </div>
-                {reservations.filter(r => r.status === "INACTIVE").length > 0 && (
-                  <button
-                    onClick={handleCleanupInactive}
-                    className="px-4 py-2 text-sm text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
-                  >
-                    Clear All Inactive
-                  </button>
-                )}
+              <div className="mb-4">
+                <h3 className="text-xl font-bold text-black">Inactive Reservations</h3>
+                <p className="text-sm text-gray-500">These reservations have expired or been cancelled</p>
               </div>
               {reservations.filter(r => r.status === "INACTIVE").length > 0 ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -503,9 +524,18 @@ export default function Reservations() {
                       <h3 className="font-semibold text-lg text-black">
                         {reservation.item?.name || `Item #${reservation.item_id}`}
                       </h3>
-                      <span className="px-2 py-1 rounded text-xs bg-gray-100 text-gray-700">
-                        {reservation.status}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="px-2 py-1 rounded text-xs bg-gray-100 text-gray-700">
+                          {reservation.status}
+                        </span>
+                        <button
+                          onClick={() => handleDeleteInactive(reservation.reservation_id)}
+                          className="text-red-500 hover:text-red-700 transition-colors p-1 opacity-100"
+                          title="Delete this reservation"
+                        >
+                          🗑️
+                        </button>
+                      </div>
                     </div>
                     
                     <div className="text-sm text-gray-600 space-y-1">

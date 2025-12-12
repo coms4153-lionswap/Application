@@ -9,6 +9,7 @@ interface Item {
   price: number;
   category: string;
   status: "available" | "reserved" | "sold";
+  seller_id: number;
   created_at: string;
   updated_at: string;
 }
@@ -42,7 +43,10 @@ export default function Items() {
   const [updating, setUpdating] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [reserving, setReserving] = useState<number | null>(null);
-  const [currentUserId] = useState(2); // TODO: Get from logged-in user
+  const [currentUserId] = useState(() => {
+    const userId = localStorage.getItem('user_id');
+    return userId ? parseInt(userId) : 0;
+  });
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -578,18 +582,26 @@ export default function Items() {
                         {item.status === "reserved" ? "Reserved" : "Sold"}
                       </button>
                     )}
-                    <button
-                      onClick={() => openEditModal(item)}
-                      className="flex-1 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => openDeleteModal(item)}
-                      className="flex-1 py-2 text-sm border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-colors"
-                    >
-                      Delete
-                    </button>
+                    {item.seller_id === currentUserId ? (
+                      <>
+                        <button
+                          onClick={() => openEditModal(item)}
+                          className="flex-1 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => openDeleteModal(item)}
+                          className="flex-1 py-2 text-sm border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-colors"
+                        >
+                          Delete
+                        </button>
+                      </>
+                    ) : (
+                      <div className="text-xs text-gray-400 text-center py-2 col-span-2">
+                        Listed by User {item.seller_id}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
