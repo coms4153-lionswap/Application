@@ -3,6 +3,51 @@ import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { API_CONFIG } from "../config";
 
+// JWT generation function (matching backend SECRET_KEY)
+const generateJWTToken = async (userId: number, role: string = "user"): Promise<string> => {
+  const SECRET_KEY = "LION_SWAP_GOAT_IS_THE_KEY";
+  const now = Math.floor(Date.now() / 1000);
+  const exp = now + (24 * 60 * 60); // 24 hours
+  
+  const header = { alg: "HS256", typ: "JWT" };
+  const payload = {
+    user_id: userId,
+    role: role,
+    iat: now,
+    exp: exp
+  };
+  
+  const base64UrlEncode = (obj: any) => {
+    return btoa(JSON.stringify(obj))
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+  };
+  
+  const headerEncoded = base64UrlEncode(header);
+  const payloadEncoded = base64UrlEncode(payload);
+  const data = `${headerEncoded}.${payloadEncoded}`;
+  
+  // HMAC-SHA256 signing
+  const encoder = new TextEncoder();
+  const keyData = encoder.encode(SECRET_KEY);
+  const messageData = encoder.encode(data);
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw',
+    keyData,
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  const signature = await crypto.subtle.sign('HMAC', cryptoKey, messageData);
+  const signatureEncoded = btoa(String.fromCharCode(...new Uint8Array(signature)))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+  
+  return `${data}.${signatureEncoded}`;
+};
+
 export default function Login() {
   const [isRegistering, setIsRegistering] = useState(false);
   const [uni, setUni] = useState("");
@@ -11,6 +56,15 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const navigate = useNavigate();
+
+  // Redirect to profile if already logged in
+  useEffect(() => {
+    const token = localStorage.getItem('app_jwt');
+    const userId = localStorage.getItem('user_id');
+    if (token || userId) {
+      navigate('/profile');
+    }
+  }, [navigate]);
 
   // Handle OAuth callback - the backend shows JSON, so user needs to copy it here
   const [showOAuthPaste, setShowOAuthPaste] = useState(false);
@@ -96,6 +150,19 @@ export default function Login() {
           console.error("Registration failed:", response.status, errorData);
           throw new Error(errorData.detail || "Failed to create account. UNI may already exist.");
         }
+        
+        // After registration, fetch user data and generate JWT
+        const userData = await response.json();
+        const userId = userData.user_id;
+        const role = userId === 11 ? "admin" : "user";
+        
+        // Store user data
+        localStorage.setItem("user_id", userId.toString());
+        localStorage.setItem("user_email", userData.email || email.trim());
+        
+        // Generate JWT token
+        const jwt = await generateJWTToken(userId, role);
+        localStorage.setItem("app_jwt", jwt);
       } else {
         // Login - verify user exists
         const response = await fetch(`${API_CONFIG.IDENTITY_SERVICE_URL}/users/${uni.trim()}`);
@@ -106,6 +173,18 @@ export default function Login() {
           }
           throw new Error("Failed to verify account");
         }
+        
+        const userData = await response.json();
+        const userId = userData.user_id;
+        const role = userId === 11 ? "admin" : "user";
+        
+        // Store user data
+        localStorage.setItem("user_id", userId.toString());
+        localStorage.setItem("user_email", userData.email || `${uni.trim()}@columbia.edu`);
+        
+        // Generate JWT token
+        const jwt = await generateJWTToken(userId, role);
+        localStorage.setItem("app_jwt", jwt);
       }
 
       // Set the session and navigate to profile

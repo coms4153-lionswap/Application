@@ -153,7 +153,7 @@ export default function Profile() {
   };
 
   const handleLogout = () => {
-    localStorage.removeItem("user_uni");
+    localStorage.clear();
     navigate("/");
   };
 

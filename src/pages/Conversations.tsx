@@ -8,6 +8,8 @@ interface Conversation {
   user_b_id: number;
   created_at: string;
   last_message_at: string;
+  user_a_name?: string;
+  user_b_name?: string;
 }
 
 interface Message {
@@ -29,10 +31,11 @@ export default function Conversations() {
   const [error, setError] = useState("");
   
   // Form states
-  const [showNewConversation, setShowNewConversation] = useState(false);
-  const [newConversation, setNewConversation] = useState({ user_a_id: "", user_b_id: "" });
   const [newMessage, setNewMessage] = useState("");
-  const [currentUserId, setCurrentUserId] = useState(1);
+  const [currentUserId, setCurrentUserId] = useState(() => {
+    const userId = localStorage.getItem('user_id');
+    return userId ? parseInt(userId) : 1;
+  });
 
   useEffect(() => {
     fetchConversations();
@@ -48,10 +51,60 @@ export default function Conversations() {
     setLoading(true);
     setError("");
     try {
-      const response = await fetch(`${API_CONFIG.CONVERSATION_SERVICE_URL}/conversations`);
+      const token = localStorage.getItem('app_jwt') || localStorage.getItem('google_access_token');
+      const response = await fetch(`${API_CONFIG.CONVERSATION_SERVICE_URL}/conversations`, {
+        headers: {
+          "Authorization": `Bearer ${token}`
+        }
+      });
       if (!response.ok) throw new Error("Failed to fetch conversations");
       const data = await response.json();
-      setConversations(data);
+      const conversations = data.conversations || [];
+      
+      console.log('Raw conversations data:', conversations);
+      
+      // Fetch actual user names from identity service using user IDs
+      const conversationsWithNames = await Promise.all(
+        conversations.map(async (conv: any) => {
+          let nameA = `User ${conv.user_a_id}`;
+          let nameB = `User ${conv.user_b_id}`;
+          
+          // Fetch user A name
+          try {
+            const userAResponse = await fetch(`${API_CONFIG.IDENTITY_SERVICE_URL}/users/by-id/${conv.user_a_id}`, {
+              headers: { "Authorization": `Bearer ${token}` }
+            });
+            if (userAResponse.ok) {
+              const userData = await userAResponse.json();
+              nameA = userData.student_name || userData.uni || `User ${conv.user_a_id}`;
+            }
+          } catch (err) {
+            console.warn(`Failed to fetch user ${conv.user_a_id}:`, err);
+          }
+          
+          // Fetch user B name
+          try {
+            const userBResponse = await fetch(`${API_CONFIG.IDENTITY_SERVICE_URL}/users/by-id/${conv.user_b_id}`, {
+              headers: { "Authorization": `Bearer ${token}` }
+            });
+            if (userBResponse.ok) {
+              const userData = await userBResponse.json();
+              nameB = userData.student_name || userData.uni || `User ${conv.user_b_id}`;
+            }
+          } catch (err) {
+            console.warn(`Failed to fetch user ${conv.user_b_id}:`, err);
+          }
+          
+          return {
+            ...conv,
+            user_a_name: nameA,
+            user_b_name: nameB
+          };
+        })
+      );
+      
+      console.log('Conversations with fetched names:', conversationsWithNames);
+      setConversations(conversationsWithNames);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load conversations");
     } finally {
@@ -61,8 +114,14 @@ export default function Conversations() {
 
   const fetchMessages = async (conversationId: number) => {
     try {
+      const token = localStorage.getItem('app_jwt') || localStorage.getItem('google_access_token');
       const response = await fetch(
-        `${API_CONFIG.CONVERSATION_SERVICE_URL}/conversations/${conversationId}/messages`
+        `${API_CONFIG.CONVERSATION_SERVICE_URL}/conversations/${conversationId}/messages`,
+        {
+          headers: {
+            "Authorization": `Bearer ${token}`
+          }
+        }
       );
       if (!response.ok) throw new Error("Failed to fetch messages");
       const data = await response.json();
@@ -72,36 +131,19 @@ export default function Conversations() {
     }
   };
 
-  const createConversation = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError("");
-    try {
-      const response = await fetch(`${API_CONFIG.CONVERSATION_SERVICE_URL}/conversations`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          user_a_id: parseInt(newConversation.user_a_id),
-          user_b_id: parseInt(newConversation.user_b_id),
-        }),
-      });
-      if (!response.ok) throw new Error("Failed to create conversation");
-      await fetchConversations();
-      setShowNewConversation(false);
-      setNewConversation({ user_a_id: "", user_b_id: "" });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create conversation");
-    }
-  };
-
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedConversation || !newMessage.trim()) return;
     
     setError("");
     try {
+      const token = localStorage.getItem('app_jwt') || localStorage.getItem('google_access_token');
       const response = await fetch(`${API_CONFIG.CONVERSATION_SERVICE_URL}/messages`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
         body: JSON.stringify({
           conversation_id: selectedConversation,
           sender_id: currentUserId,
@@ -161,19 +203,11 @@ export default function Conversations() {
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-7xl mx-auto px-4 py-8">
         {/* Header */}
-        <div className="mb-6 flex justify-between items-center">
-          <div>
-            <h1 className="text-2xl font-bold">Conversations</h1>
-            <Link to="/" className="text-sm text-blue-500 hover:underline">
-              ← Back to Home
-            </Link>
-          </div>
-          <button
-            onClick={() => setShowNewConversation(true)}
-            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-          >
-            New Conversation
-          </button>
+        <div className="mb-6">
+          <h1 className="text-2xl font-bold">Conversations</h1>
+          <Link to="/" className="text-sm text-blue-500 hover:underline">
+            ← Back to Home
+          </Link>
         </div>
 
         {error && (
@@ -206,7 +240,7 @@ export default function Conversations() {
                   >
                     <div className="flex justify-between items-start mb-1">
                       <div className="font-medium text-sm">
-                        User {conv.user_a_id} ↔ User {conv.user_b_id}
+                        {conv.user_a_name} ↔ {conv.user_b_name}
                       </div>
                       <button
                         onClick={(e) => {
@@ -231,19 +265,10 @@ export default function Conversations() {
           <div className="lg:col-span-2 bg-white border rounded shadow-sm flex flex-col h-[600px]">
             {selectedConversation ? (
               <>
-                <div className="p-3 border-b bg-gray-50 flex justify-between items-center">
+                <div className="p-3 border-b bg-gray-50">
                   <h2 className="font-semibold text-sm">
                     Conversation #{selectedConversation}
                   </h2>
-                  <div className="text-xs text-gray-600">
-                    User ID: 
-                    <input
-                      type="number"
-                      value={currentUserId}
-                      onChange={(e) => setCurrentUserId(parseInt(e.target.value) || 1)}
-                      className="ml-2 w-16 px-2 py-1 border rounded text-sm"
-                    />
-                  </div>
                 </div>
                 
                 {/* Messages */}
@@ -314,59 +339,6 @@ export default function Conversations() {
             )}
           </div>
         </div>
-
-        {/* New Conversation Modal */}
-        {showNewConversation && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-lg max-w-md w-full p-6">
-              <h2 className="text-xl font-bold mb-4">New Conversation</h2>
-              <form onSubmit={createConversation} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium mb-1">User A ID</label>
-                  <input
-                    type="number"
-                    value={newConversation.user_a_id}
-                    onChange={(e) =>
-                      setNewConversation({ ...newConversation, user_a_id: e.target.value })
-                    }
-                    className="w-full px-3 py-2 border rounded"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1">User B ID</label>
-                  <input
-                    type="number"
-                    value={newConversation.user_b_id}
-                    onChange={(e) =>
-                      setNewConversation({ ...newConversation, user_b_id: e.target.value })
-                    }
-                    className="w-full px-3 py-2 border rounded"
-                    required
-                  />
-                </div>
-                <div className="flex gap-2 justify-end">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowNewConversation(false);
-                      setNewConversation({ user_a_id: "", user_b_id: "" });
-                    }}
-                    className="px-4 py-2 border rounded hover:bg-gray-50"
-                  >
-                    Cancel
-                  </button>
-                  <button 
-                    type="submit" 
-                    className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-                  >
-                    Create
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

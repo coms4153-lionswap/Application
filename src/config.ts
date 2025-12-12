@@ -5,11 +5,14 @@ export const API_CONFIG = {
     : "https://ms1-identity-157498364441.us-east1.run.app",
   CATALOG_SERVICE_URL: import.meta.env.DEV
     ? "/api/catalog"
-    : "https://catalog-okz7qtaq4a-ue.a.run.app",
+    : "https://catalog-1003140017553.us-east1.run.app",
   CONVERSATION_SERVICE_URL: import.meta.env.DEV
     ? "/api/conversation"
-    : "https://34.23.14.69",
+    : "https://104.196.160.228",
   RESERVATION_SERVICE_URL: import.meta.env.DEV
     ? "/api/reservation"
     : "https://reservation-service-157498364441.us-east1.run.app",
+  SECURITY_SERVICE_URL: import.meta.env.DEV
+    ? "/api/security"
+    : "https://104.196.160.228",
 };

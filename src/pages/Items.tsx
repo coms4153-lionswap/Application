@@ -43,6 +43,12 @@ export default function Items() {
   const [deleting, setDeleting] = useState(false);
   const [reserving, setReserving] = useState<number | null>(null);
   const [currentUserId] = useState(2); // TODO: Get from logged-in user
+  
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize] = useState(10);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -52,49 +58,153 @@ export default function Items() {
     category: "",
     status: "available" as "available" | "reserved" | "sold",
   });
+  
+  // Image upload state
+  const [selectedImages, setSelectedImages] = useState<File[]>([]);
+  const [imageUrls, setImageUrls] = useState<string[]>([]);
+  const [uploadingImages, setUploadingImages] = useState(false);
 
   useEffect(() => {
     fetchItems();
-  }, [category]);
+  }, [category, currentPage]);
+
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    setSelectedImages(files);
+    
+    // Create preview URLs
+    const urls = files.map(file => URL.createObjectURL(file));
+    setImageUrls(urls);
+  };
+
+  const removeImage = (index: number) => {
+    const newImages = [...selectedImages];
+    const newUrls = [...imageUrls];
+    
+    URL.revokeObjectURL(newUrls[index]);
+    newImages.splice(index, 1);
+    newUrls.splice(index, 1);
+    
+    setSelectedImages(newImages);
+    setImageUrls(newUrls);
+  };
+
+  const uploadImages = async (itemId: number) => {
+    if (selectedImages.length === 0) return;
+    
+    setUploadingImages(true);
+    const token = localStorage.getItem('app_jwt') || localStorage.getItem('google_access_token');
+    
+    try {
+      for (let i = 0; i < selectedImages.length; i++) {
+        const file = selectedImages[i];
+        
+        // Step 1: Upload file to get image URL
+        const uploadFormData = new FormData();
+        uploadFormData.append('file', file);
+        
+        const uploadResponse = await fetch(
+          `${API_CONFIG.CATALOG_SERVICE_URL}/upload-image`,
+          {
+            method: 'POST',
+            headers: {
+              "Authorization": `Bearer ${token}`
+            },
+            body: uploadFormData
+          }
+        );
+        
+        if (!uploadResponse.ok) {
+          continue;
+        }
+        
+        const uploadResult = await uploadResponse.json();
+        
+        // Step 2: Attach image URL to item
+        const imageUrl = `${API_CONFIG.CATALOG_SERVICE_URL}${uploadResult.image_url}`;
+        const attachResponse = await fetch(
+          `${API_CONFIG.CATALOG_SERVICE_URL}/items/${itemId}/images`,
+          {
+            method: 'POST',
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${token}`
+            },
+            body: JSON.stringify({
+              image_url: imageUrl,
+              is_primary: i === 0
+            })
+          }
+        );
+        
+        if (!attachResponse.ok) {
+          continue;
+        }
+      }
+    } catch (err) {
+      throw err;
+    } finally {
+      setUploadingImages(false);
+    }
+  };
 
   const fetchItems = async () => {
     try {
       setLoading(true);
       setError("");
       
-      // Always fetch all items first
-      let url = `${API_CONFIG.CATALOG_SERVICE_URL}/items`;
+      // Calculate offset from page number
+      const offset = (currentPage - 1) * pageSize;
       
-      const response = await fetch(url);
-      if (!response.ok) throw new Error("Failed to fetch items");
+      // Build URL with limit and offset
+      let url = `${API_CONFIG.CATALOG_SERVICE_URL}/items?limit=${pageSize}&offset=${offset}`;
       
-      let data: Item[] = await response.json();
-      
-      // Filter by category
+      // Add category filter if not "All Categories"
       if (category !== "All Categories") {
-        if (category === "Other") {
-          // "Other" shows items not in the predefined categories (case-insensitive)
-          const predefinedCategories = ["electronics", "textbooks", "furniture", "clothing"];
-          data = data.filter(item => !predefinedCategories.includes(item.category.toLowerCase()));
-        } else {
-          // Regular category filter (case-insensitive)
-          data = data.filter(item => item.category.toLowerCase() === category.toLowerCase());
-        }
+        url += `&category=${encodeURIComponent(category)}`;
       }
       
-      // Fetch images for each item
+      const token = localStorage.getItem('app_jwt') || localStorage.getItem('google_access_token');
+      const response = await fetch(url, {
+        headers: {
+          "Authorization": `Bearer ${token}`
+        }
+      });
+      if (!response.ok) throw new Error("Failed to fetch items");
+      
+      const data: Item[] = await response.json();
+      
+      // Since backend doesn't return total, estimate based on results
+      // If we got exactly pageSize items, assume there might be more pages
+      if (data.length < pageSize) {
+        // This is the last page
+        setTotalItems(offset + data.length);
+        setTotalPages(currentPage);
+      } else {
+        // Assume at least one more page exists
+        setTotalItems(offset + data.length + 1);
+        setTotalPages(currentPage + 1);
+      }
+      
+      // Fetch images for items
       const itemsWithImages = await Promise.all(
         data.map(async (item) => {
           try {
+            const token = localStorage.getItem('app_jwt') || localStorage.getItem('google_access_token');
             const imagesResponse = await fetch(
-              `${API_CONFIG.CATALOG_SERVICE_URL}/items/${item.id}/images`
+              `${API_CONFIG.CATALOG_SERVICE_URL}/items/${item.id}/images`,
+              {
+                headers: {
+                  "Authorization": `Bearer ${token}`
+                }
+              }
             );
             if (imagesResponse.ok) {
               const images: ItemImage[] = await imagesResponse.json();
               return { ...item, images };
             }
           } catch (err) {
-            console.warn(`Failed to fetch images for item ${item.id}:`, err);
+            // Failed to fetch images
           }
           return { ...item, images: [] };
         })
@@ -115,9 +225,13 @@ export default function Items() {
     setError("");
 
     try {
+      const token = localStorage.getItem('app_jwt') || localStorage.getItem('google_access_token');
       const response = await fetch(`${API_CONFIG.CATALOG_SERVICE_URL}/items`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
         body: JSON.stringify({
           name: formData.name,
           description: formData.description || null,
@@ -132,9 +246,20 @@ export default function Items() {
         throw new Error(errorData.detail || "Failed to create item");
       }
 
+      const newItem = await response.json();
+      
+      // Upload images if any are selected
+      if (selectedImages.length > 0) {
+        await uploadImages(newItem.id);
+        // Give backend a moment to process
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+      
       await fetchItems();
       setShowCreateModal(false);
       setFormData({ name: "", description: "", price: "", category: "", status: "available" });
+      setSelectedImages([]);
+      setImageUrls([]);
     } catch (err: any) {
       setError(err.message || "Failed to create item");
     } finally {
@@ -150,9 +275,13 @@ export default function Items() {
     setError("");
 
     try {
+      const token = localStorage.getItem('app_jwt') || localStorage.getItem('google_access_token');
       const response = await fetch(`${API_CONFIG.CATALOG_SERVICE_URL}/items/${selectedItem.id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
         body: JSON.stringify({
           name: formData.name || undefined,
           description: formData.description || undefined,
@@ -167,10 +296,19 @@ export default function Items() {
         throw new Error(errorData.detail || "Failed to update item");
       }
 
+      // Upload images if any are selected
+      if (selectedImages.length > 0) {
+        await uploadImages(selectedItem.id);
+        // Give backend a moment to process
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+      
       await fetchItems();
       setShowEditModal(false);
       setSelectedItem(null);
       setFormData({ name: "", description: "", price: "", category: "", status: "available" });
+      setSelectedImages([]);
+      setImageUrls([]);
     } catch (err: any) {
       setError(err.message || "Failed to update item");
     } finally {
@@ -185,8 +323,12 @@ export default function Items() {
     setError("");
 
     try {
+      const token = localStorage.getItem('app_jwt') || localStorage.getItem('google_access_token');
       const response = await fetch(`${API_CONFIG.CATALOG_SERVICE_URL}/items/${selectedItem.id}`, {
         method: "DELETE",
+        headers: {
+          "Authorization": `Bearer ${token}`
+        }
       });
 
       if (!response.ok) {
@@ -213,6 +355,8 @@ export default function Items() {
       category: item.category,
       status: item.status,
     });
+    setSelectedImages([]);
+    setImageUrls([]);
     setShowEditModal(true);
   };
 
@@ -226,9 +370,13 @@ export default function Items() {
     setError("");
 
     try {
+      const token = localStorage.getItem('app_jwt') || localStorage.getItem('google_access_token');
       const response = await fetch(`${API_CONFIG.RESERVATION_SERVICE_URL}/items/${itemId}/reservations`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
         body: JSON.stringify({ buyer_id: currentUserId }),
       });
 
@@ -243,6 +391,34 @@ export default function Items() {
       setError(err.message || "Failed to reserve item");
     } finally {
       setReserving(null);
+    }
+  };
+
+  const handleMessageSeller = async (sellerId: number) => {
+    try {
+      const token = localStorage.getItem('app_jwt') || localStorage.getItem('google_access_token');
+      
+      // Create or find existing conversation with seller
+      const response = await fetch(`${API_CONFIG.CONVERSATION_SERVICE_URL}/conversations`, {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          user_a_id: currentUserId,
+          user_b_id: sellerId,
+        }),
+      });
+
+      if (response.ok) {
+        // Navigate to conversations page
+        window.location.href = "/conversations";
+      } else {
+        throw new Error("Failed to create conversation");
+      }
+    } catch (err: any) {
+      alert(err.message || "Failed to message seller");
     }
   };
 
@@ -297,7 +473,10 @@ export default function Items() {
           <select 
             className="px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-black text-sm cursor-pointer"
             value={category}
-            onChange={(e) => setCategory(e.target.value)}
+            onChange={(e) => {
+              setCategory(e.target.value);
+              setCurrentPage(1); // Reset to page 1 when category changes
+            }}
           >
             <option>All Categories</option>
             <option>Electronics</option>
@@ -418,6 +597,63 @@ export default function Items() {
             })}
           </div>
         )}
+        
+        {/* Pagination Controls */}
+        {!loading && filteredItems.length > 0 && totalPages > 1 && (
+          <div className="mt-8 flex items-center justify-between border-t border-gray-200 pt-6">
+            <div className="text-sm text-gray-600">
+              Page {currentPage} of {totalPages} • {totalItems} total items
+            </div>
+            
+            <div className="flex gap-2">
+              <button
+                onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                disabled={currentPage === 1}
+                className="px-4 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                ← Previous
+              </button>
+              
+              {/* Page numbers */}
+              <div className="flex gap-1">
+                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                  let pageNum;
+                  if (totalPages <= 5) {
+                    pageNum = i + 1;
+                  } else if (currentPage <= 3) {
+                    pageNum = i + 1;
+                  } else if (currentPage >= totalPages - 2) {
+                    pageNum = totalPages - 4 + i;
+                  } else {
+                    pageNum = currentPage - 2 + i;
+                  }
+                  
+                  return (
+                    <button
+                      key={pageNum}
+                      onClick={() => setCurrentPage(pageNum)}
+                      className={`px-3 py-2 text-sm rounded-lg transition-colors ${
+                        currentPage === pageNum
+                          ? 'bg-black text-white'
+                          : 'border border-gray-200 hover:bg-gray-50'
+                      }`}
+                    >
+                      {pageNum}
+                    </button>
+                  );
+                })}
+              </div>
+              
+              <button
+                onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                disabled={currentPage === totalPages}
+                className="px-4 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                Next →
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Create Modal */}
@@ -488,6 +724,38 @@ export default function Items() {
                 </select>
               </div>
 
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Images</label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={handleImageSelect}
+                  className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-black text-sm"
+                />
+                {imageUrls.length > 0 && (
+                  <div className="mt-3 grid grid-cols-3 gap-2">
+                    {imageUrls.map((url, index) => (
+                      <div key={index} className="relative group">
+                        <img src={url} alt={`Preview ${index + 1}`} className="w-full h-20 object-cover rounded-lg" />
+                        <button
+                          type="button"
+                          onClick={() => removeImage(index)}
+                          className="absolute top-1 right-1 bg-red-500 text-white rounded-full w-5 h-5 text-xs hover:bg-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          ×
+                        </button>
+                        {index === 0 && (
+                          <span className="absolute bottom-1 left-1 bg-black/70 text-white text-xs px-2 py-0.5 rounded">
+                            Primary
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <div className="flex gap-3 pt-4">
                 <button
                   type="button"
@@ -499,10 +767,10 @@ export default function Items() {
                 </button>
                 <button
                   type="submit"
-                  disabled={creating}
+                  disabled={creating || uploadingImages}
                   className="flex-1 py-3 bg-black text-white rounded-lg hover:bg-gray-800 transition-colors font-medium text-sm disabled:opacity-50"
                 >
-                  {creating ? "Creating..." : "Create"}
+                  {uploadingImages ? "Uploading images..." : creating ? "Creating..." : "Create"}
                 </button>
               </div>
             </form>
@@ -571,6 +839,38 @@ export default function Items() {
                 </select>
               </div>
 
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Add Images</label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={handleImageSelect}
+                  className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-black text-sm"
+                />
+                {imageUrls.length > 0 && (
+                  <div className="mt-3 grid grid-cols-3 gap-2">
+                    {imageUrls.map((url, index) => (
+                      <div key={index} className="relative group">
+                        <img src={url} alt={`Preview ${index + 1}`} className="w-full h-20 object-cover rounded-lg" />
+                        <button
+                          type="button"
+                          onClick={() => removeImage(index)}
+                          className="absolute top-1 right-1 bg-red-500 text-white rounded-full w-5 h-5 text-xs hover:bg-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          ×
+                        </button>
+                        {index === 0 && (
+                          <span className="absolute bottom-1 left-1 bg-black/70 text-white text-xs px-2 py-0.5 rounded">
+                            Primary
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <div className="flex gap-3 pt-4">
                 <button
                   type="button"
@@ -582,10 +882,10 @@ export default function Items() {
                 </button>
                 <button
                   type="submit"
-                  disabled={updating}
+                  disabled={updating || uploadingImages}
                   className="flex-1 py-3 bg-black text-white rounded-lg hover:bg-gray-800 transition-colors font-medium text-sm disabled:opacity-50"
                 >
-                  {updating ? "Updating..." : "Update"}
+                  {uploadingImages ? "Uploading images..." : updating ? "Updating..." : "Update"}
                 </button>
               </div>
             </form>

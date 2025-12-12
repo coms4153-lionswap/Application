@@ -1,11 +1,12 @@
 import { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { API_CONFIG } from "../config";
 
 interface Reservation {
   reservation_id: string;
   item_id: number;
   buyer_id: number;
+  seller_id?: number;
   status: "ACTIVE" | "INACTIVE";
   hold_expires_at: string;
   updated_at: string;
@@ -18,6 +19,7 @@ interface Item {
   price: number;
   category: string;
   status: string;
+  seller_id?: number;
 }
 
 interface ItemImage {
@@ -36,13 +38,19 @@ interface ItemWithImages extends Item {
 
 interface ReservationWithItem extends Reservation {
   item?: ItemWithImages;
+  seller_name?: string;
+  seller_uni?: string;
 }
 
 export default function Reservations() {
+  const navigate = useNavigate();
   const [reservations, setReservations] = useState<ReservationWithItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [currentUserId] = useState(2); // TODO: Get from logged-in user
+  const [currentUserId] = useState(() => {
+    const userId = localStorage.getItem('user_id');
+    return userId ? parseInt(userId) : 2;
+  });
 
   useEffect(() => {
     fetchReservations();
@@ -52,19 +60,49 @@ export default function Reservations() {
     setLoading(true);
     setError("");
     try {
-      const response = await fetch(`${API_CONFIG.RESERVATION_SERVICE_URL}/reservations?buyer_id=${currentUserId}`);
+      const token = localStorage.getItem('app_jwt') || localStorage.getItem('google_access_token');
+      const response = await fetch(`${API_CONFIG.RESERVATION_SERVICE_URL}/reservations?buyer_id=${currentUserId}`, {
+        headers: {
+          "Authorization": `Bearer ${token}`
+        }
+      });
       if (!response.ok) throw new Error("Failed to fetch reservations");
       const data = await response.json();
+      
+      // Filter to only show reservations for current user (both active and inactive)
+      const myReservations = data.filter((r: Reservation) => {
+        const isMyReservation = r.buyer_id === currentUserId;
+        return isMyReservation;
+      });
       
       // Verify each item still exists, fetch item details, and remove reservations for missing items
       const validReservations: ReservationWithItem[] = [];
       const missingItemReservations: string[] = [];
       
-      for (const reservation of data) {
+      for (const reservation of myReservations) {
         try {
           const itemResponse = await fetch(`${API_CONFIG.CATALOG_SERVICE_URL}/items/${reservation.item_id}`);
           if (itemResponse.ok) {
             const item = await itemResponse.json();
+            
+            // Fetch seller information
+            let seller_name = undefined;
+            let seller_uni = undefined;
+            if (reservation.seller_id || item.seller_id) {
+              const sellerId = reservation.seller_id || item.seller_id;
+              try {
+                const sellerResponse = await fetch(`${API_CONFIG.IDENTITY_SERVICE_URL}/users/by-id/${sellerId}`, {
+                  headers: { "Authorization": `Bearer ${token}` }
+                });
+                if (sellerResponse.ok) {
+                  const sellerData = await sellerResponse.json();
+                  seller_name = sellerData.student_name;
+                  seller_uni = sellerData.uni;
+                }
+              } catch {
+                // Ignore seller fetch errors
+              }
+            }
             
             // Fetch images for the item
             try {
@@ -73,12 +111,12 @@ export default function Reservations() {
               );
               if (imagesResponse.ok) {
                 const images: ItemImage[] = await imagesResponse.json();
-                validReservations.push({ ...reservation, item: { ...item, images } });
+                validReservations.push({ ...reservation, item: { ...item, images }, seller_name, seller_uni });
               } else {
-                validReservations.push({ ...reservation, item: { ...item, images: [] } });
+                validReservations.push({ ...reservation, item: { ...item, images: [] }, seller_name, seller_uni });
               }
             } catch {
-              validReservations.push({ ...reservation, item: { ...item, images: [] } });
+              validReservations.push({ ...reservation, item: { ...item, images: [] }, seller_name, seller_uni });
             }
           } else {
             // Item doesn't exist, mark for deletion
@@ -114,13 +152,97 @@ export default function Reservations() {
     
     setError("");
     try {
+      const token = localStorage.getItem('app_jwt') || localStorage.getItem('google_access_token');
       const response = await fetch(`${API_CONFIG.RESERVATION_SERVICE_URL}/reservations/${reservationId}`, {
         method: "DELETE",
+        headers: {
+          "Authorization": `Bearer ${token}`
+        }
       });
       if (!response.ok) throw new Error("Failed to cancel reservation");
       await fetchReservations();
     } catch (err: any) {
       setError(err.message || "Failed to cancel reservation");
+    }
+  };
+
+  const handleMessageSeller = async (sellerId: number) => {
+    try {
+      const token = localStorage.getItem('app_jwt') || localStorage.getItem('google_access_token');
+      
+      // Fetch current user's uni
+      let currentUserUni = localStorage.getItem('user_uni');
+      if (!currentUserUni) {
+        try {
+          const userResponse = await fetch(`${API_CONFIG.IDENTITY_SERVICE_URL}/users/by-id/${currentUserId}`, {
+            headers: { "Authorization": `Bearer ${token}` }
+          });
+          if (userResponse.ok) {
+            const userData = await userResponse.json();
+            if (userData && userData.uni) {
+              currentUserUni = userData.uni;
+              localStorage.setItem('user_uni', userData.uni);
+            }
+          }
+        } catch (err) {
+          console.warn("Failed to fetch current user uni:", err);
+        }
+      }
+      // Fallback if still not found
+      if (!currentUserUni) {
+        currentUserUni = `user_${currentUserId}`;
+      }
+      
+      // Fetch seller's uni
+      let sellerUni = `user_${sellerId}`;
+      try {
+        const userResponse = await fetch(`${API_CONFIG.IDENTITY_SERVICE_URL}/users/by-id/${sellerId}`, {
+          headers: { "Authorization": `Bearer ${token}` }
+        });
+        if (userResponse.ok) {
+          const userData = await userResponse.json();
+          if (userData && userData.uni) {
+            sellerUni = userData.uni;
+          }
+        } else {
+          console.warn(`Failed to fetch seller ${sellerId}: ${userResponse.status}`);
+        }
+      } catch (err) {
+        console.warn("Failed to fetch seller uni:", err);
+      }
+      
+      const requestBody = {
+        user_a_id: currentUserId,
+        user_b_id: sellerId,
+        user_a_uni: currentUserUni,
+        user_b_uni: sellerUni,
+      };
+      
+      console.log('Sending to conversation API:', requestBody);
+      
+      // Create or find existing conversation with seller
+      const response = await fetch(`${API_CONFIG.CONVERSATION_SERVICE_URL}/conversations`, {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (response.ok) {
+        const responseData = await response.json();
+        console.log('Backend response:', responseData);
+        // Navigate to conversations page
+        navigate("/conversations");
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        const errorMsg = errorData.detail || errorData.message || `Server error: ${response.status}`;
+        throw new Error(errorMsg);
+      }
+    } catch (err: any) {
+      console.error("Failed to create conversation:", err);
+      alert(typeof err === 'string' ? err : err.message || "Failed to message seller");
     }
   };
 
@@ -132,10 +254,14 @@ export default function Reservations() {
         r => r.item_id === itemId && r.status === "INACTIVE"
       );
       
+      const token = localStorage.getItem('app_jwt') || localStorage.getItem('google_access_token');
       for (const inactiveRes of inactiveReservations) {
         try {
           await fetch(`${API_CONFIG.RESERVATION_SERVICE_URL}/reservations/${inactiveRes.reservation_id}`, {
             method: "DELETE",
+            headers: {
+              "Authorization": `Bearer ${token}`
+            }
           });
         } catch {
           // Continue even if deletion fails
@@ -145,7 +271,10 @@ export default function Reservations() {
       // Now create the new reservation
       const response = await fetch(`${API_CONFIG.RESERVATION_SERVICE_URL}/items/${itemId}/reservations`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
         body: JSON.stringify({ buyer_id: currentUserId }),
       });
 
@@ -166,11 +295,15 @@ export default function Reservations() {
     
     setError("");
     const inactiveReservations = reservations.filter(r => r.status === "INACTIVE");
+    const token = localStorage.getItem('app_jwt') || localStorage.getItem('google_access_token');
     
     for (const reservation of inactiveReservations) {
       try {
         await fetch(`${API_CONFIG.RESERVATION_SERVICE_URL}/reservations/${reservation.reservation_id}`, {
           method: "DELETE",
+          headers: {
+            "Authorization": `Bearer ${token}`
+          }
         });
       } catch {
         // Continue even if deletion fails
@@ -182,7 +315,9 @@ export default function Reservations() {
 
   const getTimeRemaining = (expiresAt: string) => {
     const now = new Date().getTime();
-    const expiry = new Date(expiresAt).getTime();
+    // Add 'Z' to treat as UTC if not already present
+    const expiryStr = expiresAt.includes('Z') ? expiresAt : expiresAt + 'Z';
+    const expiry = new Date(expiryStr).getTime();
     const diff = expiry - now;
     
     if (diff <= 0) return "Expired";
@@ -289,7 +424,21 @@ export default function Reservations() {
                     </div>
                   </div>
 
+                  {reservation.seller_name && reservation.seller_uni && (
+                    <div className="pt-2 pb-2 text-sm text-gray-600 border-t border-gray-100">
+                      <p>👤 Seller: <span className="font-medium text-gray-900">{reservation.seller_name}</span> ({reservation.seller_uni})</p>
+                    </div>
+                  )}
+                  
                   <div className="flex gap-2 pt-4 border-t border-gray-100">
+                    {reservation.seller_id && reservation.seller_id !== 0 && reservation.seller_id !== currentUserId && (
+                      <button
+                        onClick={() => handleMessageSeller(reservation.seller_id!)} 
+                        className="flex-1 py-2 text-sm border border-blue-500 text-blue-600 rounded-lg hover:bg-blue-50 transition-colors"
+                      >
+                        Message Seller
+                      </button>
+                    )}
                     <button
                       onClick={() => handleCancelReservation(reservation.reservation_id)}
                       className="flex-1 py-2 text-sm border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-colors"

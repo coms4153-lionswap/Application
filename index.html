@@ -7,16 +7,6 @@
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
     <title>LionSwap</title>
-    <script>
-      window.onerror = function(message, source, lineno, colno, error) {
-        var errorDiv = document.createElement('div');
-        errorDiv.style.cssText = 'position:fixed;top:0;left:0;width:100%;background:red;color:white;padding:20px;z-index:9999;font-family:monospace;';
-        errorDiv.innerHTML = '<h3>Global Error</h3><p>' + message + '</p><p>' + source + ':' + lineno + '</p>';
-        document.body.appendChild(errorDiv);
-        console.error("Global Error:", message, source, lineno, error);
-      };
-      console.log("Index.html loaded, waiting for module...");
-    </script>
   </head>
    <body style="background-color: #FFFFFF; color: #000000; margin: 0; font-family: sans-serif;">
     <div id="root">
