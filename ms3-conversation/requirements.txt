@@ -1,7 +1,0 @@
-fastapi
-uvicorn
-pydantic
-asyncmy
-python-dotenv
-sqlalchemy>=2.0
-mysql-connector-python
